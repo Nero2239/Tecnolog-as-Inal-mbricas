@@ -1,1 +1,115 @@
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
 
+// Nombre del dispositivo
+#define DEVICE_NAME "PSPSPSPS"
+
+// UUIDs que coinciden con tus bloques
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pCharacteristic = NULL;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
+// Definición de los 3 pines para LEDs exteriores
+const int led1 = 4;  // Pin G4
+const int led2 = 21;  // Pin G5
+const int led3 = 18; // Pin G18
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      Serial.println("App Conectada");
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      Serial.println("App Desconectada");
+    }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      String value = pCharacteristic->getValue(); 
+
+      if (value.length() > 0) {
+        char comando = value[0]; // Recibe '1', '2' o '3' (49, 50, 51)
+        
+        // Lógica independiente para cada LED
+        if (comando == '1') { 
+          digitalWrite(led1, !digitalRead(led1)); // Toggle LED 1
+          Serial.println("LED 1 (G4) cambiado");
+        } 
+        else if (comando == '2') { 
+          digitalWrite(led2, !digitalRead(led2)); // Toggle LED 2
+          Serial.println("LED 2 (G5) cambiado");
+        } 
+        else if (comando == '3') { 
+          digitalWrite(led3, !digitalRead(led3)); // Toggle LED 3
+          Serial.println("LED 3 (G18) cambiado");
+        }
+      }
+    }
+};
+
+void setup() {
+  Serial.begin(115200);
+  
+  // Configurar los 3 pines como salida
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+  pinMode(led3, OUTPUT);
+  
+  // Inician apagados
+  digitalWrite(led1, LOW);
+  digitalWrite(led2, LOW);
+  digitalWrite(led3, LOW);
+
+  // Apagar el LED azul integrado (Pin 2) para proteger la placa
+  pinMode(2, OUTPUT);
+  digitalWrite(2, LOW);
+
+  BLEDevice::init(DEVICE_NAME);
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  pCharacteristic = pService->createCharacteristic(
+                      CHARACTERISTIC_UUID,
+                      BLECharacteristic::PROPERTY_READ   |
+                      BLECharacteristic::PROPERTY_WRITE  |
+                      BLECharacteristic::PROPERTY_NOTIFY
+                    );
+
+  pCharacteristic->addDescriptor(new BLE2902());
+  pCharacteristic->setCallbacks(new MyCallbacks());
+
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(false);
+  pAdvertising->setMinPreferred(0x0); 
+  BLEDevice::startAdvertising();
+  
+  Serial.println("Sistema de 3 LEDs listo...");
+}
+
+void loop() {
+  // Manejo de reconexión
+  if (!deviceConnected && oldDeviceConnected) {
+      delay(500); 
+      pServer->startAdvertising(); 
+      Serial.println("Buscando conexión nuevamente...");
+      oldDeviceConnected = deviceConnected;
+  }
+  
+  if (deviceConnected && !oldDeviceConnected) {
+      oldDeviceConnected = deviceConnected;
+  }
+}
