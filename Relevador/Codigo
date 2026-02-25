@@ -1,0 +1,63 @@
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+
+// UUIDs de tu App (Verificados)
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+const int pinRele = 18;
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      // FORMA SEGURA: Leemos los datos directamente como un puntero de bytes
+      uint8_t* data = pCharacteristic->getData();
+      size_t len = pCharacteristic->getLength();
+
+      if (len > 0) {
+        int comando = data[0]; // Extraemos el primer número enviado (49 o 50)
+        
+        Serial.print("Comando recibido: ");
+        Serial.println(comando);
+
+        if (comando == 49) { // Botón Encender
+          digitalWrite(pinRele, HIGH);
+          Serial.println("Relé ACTIVADO");
+        } 
+        else if (comando == 50) { // Botón Apagar
+          digitalWrite(pinRele, LOW);
+          Serial.println("Relé DESACTIVADO");
+        }
+      }
+    }
+};
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(pinRele, OUTPUT);
+  digitalWrite(pinRele, LOW); 
+
+  BLEDevice::init("Alchileconestacosa");
+  BLEServer *pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+                                         CHARACTERISTIC_UUID,
+                                         BLECharacteristic::PROPERTY_READ |
+                                         BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  pCharacteristic->setCallbacks(new MyCallbacks());
+  pService->start();
+
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  BLEDevice::startAdvertising();
+  
+  Serial.println("Listo! Conecta tu App y usa los dos botones.");
+}
+
+void loop() {
+  // El sistema funciona por eventos, no necesitas nada aquí.
+}
