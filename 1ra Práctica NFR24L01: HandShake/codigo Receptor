@@ -1,0 +1,35 @@
+#include <SPI.h>
+#include <RF24.h>
+
+#define CE_PIN 4
+#define CSN_PIN 5
+
+RF24 radio(CE_PIN, CSN_PIN);
+const byte direccion[6] = "00002";
+
+void setup() {
+  Serial.begin(115200);
+  
+  if (!radio.begin()) {
+    Serial.println("NRF24 NO detectado");
+    while (1);
+  }
+
+  Serial.println("NRF24 detectado");
+
+  radio.setChannel(76);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+
+  radio.openReadingPipe(0, direccion);
+  radio.startListening();
+}
+
+void loop() {
+  if (radio.available()) {
+    char texto[32] = "";
+    radio.read(&texto, sizeof(texto));
+    Serial.print("Recibido: ");
+    Serial.println(texto);
+  }
+}
