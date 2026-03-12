@@ -1,0 +1,54 @@
+#include <SPI.h>
+#include <RF24.h>
+
+#define CE_PIN 4
+#define CSN_PIN 5
+#define BOTON 15
+
+RF24 radio(CE_PIN, CSN_PIN);
+
+const byte direccion[6] = "00001";
+
+bool ultimoEstado = HIGH;
+
+void setup() {
+
+  Serial.begin(115200);
+  pinMode(BOTON, INPUT_PULLUP);
+
+  if (!radio.begin()) {
+    Serial.println("NRF24 no detectado");
+    while (1);
+  }
+
+  radio.setChannel(76);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+
+  radio.openWritingPipe(direccion);
+  radio.stopListening();
+
+  Serial.println("Transmisor listo");
+}
+
+void loop() {
+
+  bool estadoBoton = digitalRead(BOTON);
+
+  if (estadoBoton == LOW && ultimoEstado == HIGH) {
+
+    const char mensaje[] = "HOLA";
+
+    bool ok = radio.write(&mensaje, sizeof(mensaje));
+
+    if (ok) {
+      Serial.println("Mensaje enviado");
+    } else {
+      Serial.println("Error al enviar");
+    }
+
+    delay(300); // anti rebote
+  }
+
+  ultimoEstado = estadoBoton;
+}
