@@ -1,0 +1,64 @@
+#include <SPI.h>
+#include <RF24.h>
+
+#define CE_PIN 4
+#define CSN_PIN 5
+#define SOUND_PIN 27   // ✅ DO del KY-037
+
+RF24 radio(CE_PIN, CSN_PIN);
+const byte direccion[6] = "00001";
+
+bool estadoAnterior = LOW;
+
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(SOUND_PIN, INPUT);
+
+  if (!radio.begin()) {
+    Serial.println("❌ NRF24 NO detectado");
+    while (1);
+  } else {
+    Serial.println("✅ NRF24 detectado");
+  }
+
+  radio.setChannel(76);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setDataRate(RF24_250KBPS);
+
+  radio.openWritingPipe(direccion);
+  radio.stopListening();
+
+  Serial.println("🎤 Transmisor digital listo");
+}
+
+void loop() {
+
+  int estado = digitalRead(SOUND_PIN);
+
+  if (estado == HIGH) {
+    Serial.println("🔊 SONIDO DETECTADO");
+  } else {
+    Serial.println("🔇 silencio");
+  }
+
+  // Detecta flanco (cuando aparece sonido)
+  if (estado == HIGH && estadoAnterior == LOW) {
+
+    const char mensaje[] = "SONIDO";
+
+    bool ok = radio.write(&mensaje, sizeof(mensaje));
+
+    if (ok) {
+      Serial.println("📤 Mensaje enviado");
+    } else {
+      Serial.println("❌ Error al enviar");
+    }
+
+    delay(300); // anti rebote
+  }
+
+  estadoAnterior = estado;
+
+  delay(50);
+}
