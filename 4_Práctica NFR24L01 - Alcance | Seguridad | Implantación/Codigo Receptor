@@ -1,0 +1,62 @@
+#include <SPI.h>
+#include <RF24.h>
+
+// Pines para el nRF24L01 en ESP32 DevKit
+#define CE_PIN   4
+#define CSN_PIN  5
+#define LED 2 // LED interno del ESP32
+
+RF24 radio(CE_PIN, CSN_PIN);
+
+// La dirección debe ser la MISMA que en el transmisor
+const byte direccion[6] = "00001";
+
+bool estadoLed = false;
+
+void setup() {
+  Serial.begin(115200);
+  
+  pinMode(LED_AZUL, OUTPUT);
+  digitalWrite(LED_AZUL, LOW);
+
+  // Inicializar radio
+  if (!radio.begin()) {
+    Serial.println("NRF24 NO detectado");
+    while (1);
+  }
+
+  // CONFIGURACIÓN IDÉNTICA AL TRANSMISOR
+  radio.setChannel(76);              // Canal 76
+  radio.setPALevel(RF24_PA_MAX);     // Potencia máxima
+  radio.setDataRate(RF24_250KBPS);   // Velocidad baja (mejor alcance)
+
+  // Abrir tubería de lectura
+  radio.openReadingPipe(1, direccion);
+  
+  // IMPORTANTE: Empezar a escuchar
+  radio.startListening();
+
+  Serial.println("Receptor listo, esperando señal...");
+}
+
+void loop() {
+  // ¿Hay datos disponibles en el aire?
+  if (radio.available()) {
+    char mensaje[7]; // Suficiente para "TOGGLE" + caracter nulo
+    
+    // Leer los datos
+    radio.read(&mensaje, sizeof(mensaje));
+    mensaje[6] = '\0'; // Asegurar que el texto termine correctamente
+
+    Serial.print("Recibido: ");
+    Serial.println(mensaje);
+
+    // Si el mensaje es el correcto, cambiamos el estado del LED
+    if (String(mensaje) == "TOGGLE") {
+      estadoLed = !estadoLed;
+      digitalWrite(LED_AZUL, estadoLed ? HIGH : LOW);
+      Serial.print("Estado del LED: ");
+      Serial.println(estadoLed ? "ENCENDIDO" : "APAGADO");
+    }
+  }
+}
