@@ -1,0 +1,13 @@
+CREATE DATABASE sistema_acceso;
+USE sistema_acceso;
+
+CREATE TABLE registros_nfc (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    uid_hex VARCHAR(50),
+    uid_dec VARCHAR(50),
+    uid_bin VARCHAR(100),
+    fecha_acceso TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    estatus VARCHAR(20)
+);
+
+SELECT * FROM registros_nfc;
