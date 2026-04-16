@@ -1,0 +1,60 @@
+import serial
+import mysql.connector
+import time
+
+# Configuración de tu base de datos
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'hola', # <--- ASEGÚRATE QUE ESTA SEA TU CLAVE
+    'database': 'sistema_acceso'
+}
+
+try:
+    print("Conectando a MySQL...")
+    db = mysql.connector.connect(**db_config)
+    cursor = db.cursor()
+    print("¡Conexión a MySQL exitosa!")
+
+    # --- REVISA EL PUERTO AQUÍ ---
+    # Si en el Administrador de Dispositivos sale COM4, cámbialo abajo.
+    puerto = serial.Serial('COM4', 115200, timeout=1)
+    time.sleep(2) 
+    
+    print("\n>>> SISTEMA INTEGRADO: ESP32 + PYTHON + MYSQL <<<")
+    print("Esperando datos... (Pasa la tarjeta por el sensor)")
+
+    while True:
+        if puerto.in_waiting > 0:
+            # Leemos lo que llegue y lo limpiamos
+            linea = puerto.readline().decode('utf-8', errors='ignore').strip()
+            
+            # ESTO ES VITAL: Te mostrará CUALQUER COSA que mande el ESP32
+            print(f"DEBUG: Recibido del ESP32 -> '{linea}'")
+
+            # Si la línea empieza con DATA, procesamos para Workbench
+            if "DATA," in linea:
+                partes = linea.split(',')
+                
+                # DATA, HEX, DEC, BIN, STATUS
+                u_hex = partes[1]
+                u_dec = partes[2]
+                u_bin = partes[3]
+                u_status = partes[4]
+
+                # Insertar en Workbench
+                sql = "INSERT INTO registros_nfc (uid_hex, uid_dec, uid_bin, estatus) VALUES (%s, %s, %s, %s)"
+                valores = (u_hex, u_dec, u_bin, u_status)
+                
+                cursor.execute(sql, valores)
+                db.commit() # Si no hay commit, la tabla se queda vacía
+                
+                print(f"REGISTRO GUARDADO EN WORKBENCH (〃￣︶￣)人(￣︶￣〃): {u_hex} | {u_status}")
+                print("-" * 50)
+
+except serial.SerialException:
+    print("ERROR: No se pudo abrir el puerto COM. ¿Sigue abierto el Monitor de Arduino?")
+except mysql.connector.Error as err:
+    print(f" ERROR DE MYSQL: {err}")
+except Exception as e:
+    print(f" ERROR: {e}")
