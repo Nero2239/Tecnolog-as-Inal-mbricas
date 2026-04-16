@@ -1,0 +1,78 @@
+#include <Wire.h>
+#include <Adafruit_PN532.h>
+
+// Configuración de pines I2C para ESP32
+#define SDA_PIN 21
+#define SCL_PIN 22
+
+Adafruit_PN532 nfc(SDA_PIN, SCL_PIN);
+
+// --- BASE DE DATOS DE TARJETAS AUTORIZADAS ---
+const int NUM_LLAVES = 2;
+uint8_t llavesAutorizadas[NUM_LLAVES][4] = {
+  { 0xA1, 0xE8, 0x6C, 0x1D }, // Tarjeta 1
+  { 0xF9, 0xDB, 0x39, 0x14 }  // Tarjeta 2
+}; 
+
+void setup(void) {
+  Serial.begin(115200); // Velocidad para el puerto COM
+  nfc.begin();
+  nfc.SAMConfig();
+}
+
+void loop(void) {
+  uint8_t success;
+  uint8_t uid[] = { 0, 0, 0, 0, 0, 0, 0 };
+  uint8_t uidLength;
+
+  success = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength);
+
+  if (success) {
+    bool autorizado = false;
+
+    // 1. Iniciar trama para la Base de Datos
+    Serial.print("DATA,");
+
+    // 2. Formato HEXADECIMAL (Base 16)
+    for (uint8_t i = 0; i < uidLength; i++) {
+      if (uid[i] < 0x10) Serial.print("0");
+      Serial.print(uid[i], HEX);
+    }
+    Serial.print(",");
+
+    // 3. Formato DECIMAL (Base 10)
+    for (uint8_t i = 0; i < uidLength; i++) {
+      Serial.print(uid[i], DEC);
+      if (i < uidLength - 1) Serial.print(".");
+    }
+    Serial.print(",");
+
+    // 4. Formato BINARIO (Base 2)
+    for (uint8_t i = 0; i < uidLength; i++) {
+      Serial.print(uid[i], BIN);
+      if (i < uidLength - 1) Serial.print(".");
+    }
+    Serial.print(",");
+
+    // 5. Lógica de validación
+    for (int j = 0; j < NUM_LLAVES; j++) {
+      bool coincidencia = true;
+      for (int i = 0; i < 4; i++) {
+        if (uid[i] != llavesAutorizadas[j][i]) {
+          coincidencia = false;
+          break;
+        }
+      }
+      if (coincidencia) { autorizado = true; break; }
+    }
+
+    // 6. Estatus final para la columna 'estatus' en Workbench
+    if (autorizado) {
+      Serial.println("AUTORIZADO");
+    } else {
+      Serial.println("DENEGADO");
+    }
+
+    delay(3000); // Pausa para evitar spam en la base de datos
+  }
+}
