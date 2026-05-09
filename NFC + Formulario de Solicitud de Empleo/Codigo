@@ -1,0 +1,61 @@
+#include "Wire.h"
+#include "PN532_I2C.h"
+#include "PN532.h"
+#include "emulatetag.h"
+#include "NdefMessage.h"
+
+// 1. Interfaz física (I2C)
+PN532_I2C pn532i2c(Wire);
+
+// 2. Objeto PN532 principal (¡Este es el que usamos para inicializar el hardware!)
+PN532 pn532(pn532i2c);
+
+// 3. Objeto para la emulación
+EmulateTag nfc(pn532i2c);
+
+const char* miURL = "https://tu-sitio-web.com";
+
+uint8_t ndefBuf[128];
+NdefMessage message;
+int messageSize;
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("Iniciando sistema...");
+
+  // AHORA SÍ: Inicializamos el hardware usando el objeto base
+  pn532.begin();
+
+  // Comprobación de hardware (Muy útil para descartar problemas de cables)
+  uint32_t versiondata = pn532.getFirmwareVersion();
+  if (!versiondata) {
+    Serial.println("Error: No se encontró la placa PN53x. Revisa los cables I2C y los switches DIP.");
+    while (1); // Detener el código aquí si falla
+  }
+  Serial.println("¡Módulo PN532 detectado y listo!");
+
+  // Construir el mensaje NDEF
+  message.addUriRecord(miURL);
+  messageSize = message.getEncodedSize();
+  
+  if (messageSize > sizeof(ndefBuf)) {
+    Serial.println("Error: El mensaje es muy grande para el buffer");
+    while (1); 
+  }
+  
+  message.encode(ndefBuf);
+
+  // Configuramos la emulación con el mensaje
+  nfc.setNdefFile(ndefBuf, messageSize);
+  
+  // Asignar un número de serie (UID) falso es requerido por algunos teléfonos
+  uint8_t uid[3] = { 0x12, 0x34, 0x56 };
+  nfc.setUid(uid);
+
+  Serial.println("Emulando etiqueta NFC. ¡Acerca tu teléfono!");
+}
+
+void loop() {
+  // Solo necesitamos llamar a emulate() en el loop
+  nfc.emulate(); 
+}
