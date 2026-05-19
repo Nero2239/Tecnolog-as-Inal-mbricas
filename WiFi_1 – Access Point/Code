@@ -1,0 +1,123 @@
+#include <WiFi.h>
+#include <DNSServer.h>
+#include <WebServer.h>
+
+// Configuración de la red 🙏🙏🙏🙏🍌🍌🍌🍌🍌🍌🍌🔥🔥🔥🔥🔥🔥🔥🔥🔥🙏🙏🙏🙏🍌🍌🍌🍌🍌🍌🍌🔥🔥🔥🔥🔥🔥🔥🔥🔥🙏🙏🙏🙏🍌🍌🍌🍌🍌🍌🍌🔥🔥🔥🔥🔥🔥🔥🔥🔥🙏🙏🙏🙏🍌🍌🍌🍌🍌🍌🍌🔥🔥🔥🔥🔥🔥🔥🔥🔥
+const char* SSID_NAME = "PENELOPE";
+const byte DNS_PORT = 53;
+IPAddress apIP(192, 168, 4, 1);
+IPAddress netMsk(255, 255, 255, 0);
+
+DNSServer dnsServer;
+WebServer server(80);
+
+// Diseño del Portal Cautivo en HTML/CSS (Modo Premium Dark/Neon)
+const char HTML_PORTAL[] PROGMEM = R"=====(
+<!DOCTYPE html>
+<html lang='es'>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>Portal Cautivo - InnovaHub</title>
+</head>
+<body>
+    <div class='card'>
+        <div class='logo-container'>
+            <div class='logo-icon'>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="3"></line></svg>
+            </div>
+        </div>
+        <h1>¡Bienvenido a InnovaHub!</h1>
+        <p class='welcome'>Portal de Acceso • Lab de Innovación</p>
+        
+        <div class='info-box'>
+            Estás en el nodo central de pruebas IoT. Regístrate para sincronizar tu dispositivo al ecosistema y habilitar el tráfico de red.
+        </div>
+
+        <form action='/login' method='POST'>
+            <div class='input-group'>
+                <label for='nombre'>Nombre Completo</label>
+                <input type='text' id='nombre' name='usuario_nombre' placeholder='Ej. Juan Pérez' required autocomplete='off'>
+            </div>
+
+            <div class='input-group'>
+                <label for='correo'>Matrícula o Email</label>
+                <input type='text' id='correo' name='usuario_contacto' placeholder='usuario@dominio.com' required autocomplete='off'>
+            </div>
+
+            <button type='submit'>Vincular Dispositivo</button>
+        </form>
+    </div>
+</body>
+</html>
+)=====";
+
+// Pantalla de Éxito tras enviar los datos (Diseño Homogéneo)
+void handleLogin() {
+  if (server.hasArg("usuario_nombre") && server.hasArg("usuario_contacto")) {
+    String nombre = server.arg("usuario_nombre");
+    String contacto = server.arg("usuario_contacto");
+
+    Serial.println("\n--- NUEVO USUARIO REGISTRADO ---");
+    Serial.print("Nombre: "); Serial.println(nombre);
+    Serial.print("Contacto/Matrícula: "); Serial.println(contacto);
+    Serial.println("---------------------------------");
+
+    String htmlResponse = "<html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>";
+    htmlResponse += "<style>body{font-family:'Segoe UI',sans-serif; background:radial-gradient(circle at top, #111827 0%, #030712 100%); color:#fff; display:flex; justify-content:center; align-items:center; min-height:100vh; margin:0;}";
+    htmlResponse += ".card{background:rgba(31,41,55,0.6); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,0.05); padding:40px; border-radius:20px; text-align:center; max-width:400px; width:90%; box-shadow:0 20px 40px rgba(0,0,0,0.5);}";
+    htmlResponse += ".icon{width:60px; height:60px; background:#10b981; border-radius:50%; display:inline-flex; justify-content:center; align-items:center; margin-bottom:20px; box-shadow:0 0 20px rgba(16,185,129,0.4);}";
+    htmlResponse += "h1{color:#10b981; font-size:24px; font-weight:800; margin-bottom:10px;} p{color:#9ca3af; font-size:15px; line-height:1.5;}</style></head><body>";
+    htmlResponse += "<div class='card'><div class='icon'><svg width='30' height='30' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'><polyline points='20 6 9 17 4 12'></polyline></svg></div>";
+    htmlResponse += "<h1>¡Acceso Concedido!</h1>";
+    htmlResponse += "<p>Excelente, <strong>" + nombre + "</strong>.<br>Tu dispositivo se ha registrado correctamente en el nodo central. Ya puedes navegar.</p>";
+    htmlResponse += "</div></body></html>";
+    
+    server.send(200, "text/html", htmlResponse);
+  } else {
+    server.send(400, "text/plain", "Datos incompletos.");
+  }
+}
+
+// Servir el portal cautivo
+void handlePortal() {
+  server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  server.sendHeader("Pragma", "no-cache");
+  server.sendHeader("Expires", "-1");
+  server.send(200, "text/html", HTML_PORTAL);
+}
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\nIniciando Configuración del Portal Cautivo...");🙏🙏🙏🙏🍌🍌🍌🍌🍌🍌🍌🔥🔥🔥🔥🔥🔥🔥🔥🔥
+
+  // 1. Configurar la ESP32 en Modo Access Point (AP) 🙏🙏🙏🙏🍌🍌🍌🍌🍌🍌🍌🔥🔥🔥🔥🔥🔥🔥🔥🔥
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(apIP, apIP, netMsk);
+  WiFi.softAP(SSID_NAME); 
+
+  Serial.print("Red Wi-Fi activa: ");
+  Serial.println(SSID_NAME);
+  Serial.print("Dirección IP del servidor: ");
+  Serial.println(WiFi.softAPIP());
+
+  // 2. Levantar el Servidor DNS (Redirección total)
+  dnsServer.start(DNS_PORT, "*", apIP);
+
+  // 3. Rutas del Servidor Web
+  server.on("/", handlePortal);
+  server.on("/login", HTTP_POST, handleLogin);
+  
+  server.onNotFound([]() {
+    server.sendHeader("Location", String("http://") + apIP.toString(), true);
+    server.send(302, "text/plain", ""); 
+  });
+
+  server.begin();
+  Serial.println("Servidor Web listo.");
+}
+
+void loop() {
+  dnsServer.processNextRequest();
+  server.handleClient();
+}
