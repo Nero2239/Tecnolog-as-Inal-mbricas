@@ -1,0 +1,55 @@
+#include <WiFi.h>
+#include "esp_netif.h" 
+
+// --- CONFIGURACIÓN DE RED ---
+// Define aquí la red que provee internet a la ESP32
+const char* RED_CON_INTERNET = "P"; //nombre de la red
+const char* CONTRASEÑA_INTERNET = "sabrosaldo"; //contraseña de la red
+
+// Define aquí el nombre y contraseña de la red que la ESP32 va a crear
+const char* AP_SSID = "COUITUS MAXIMUS";
+const char* AP_PASSWORD = "123456789"; 
+
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\n--- Iniciando ESP32 en Modo Repetidor con NAT ---");
+
+  // 1. Configurar el modo Wi-Fi en Dual (AP + STA)
+  // AP: Crea su propia red para otros dispositivos.
+  // STA: Se conecta a una red existente para obtener internet.
+  WiFi.mode(WIFI_AP_STA);
+
+  // 2. Iniciar la conexión a la red externa (Estación)
+  WiFi.begin(RED_CON_INTERNET, CONTRASEÑA_INTERNET);
+  Serial.print("Conectando a la red...");
+  
+  // Bucle de espera hasta que la conexión sea exitosa
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\n¡Conectado a internet!");
+
+  // 3. Crear la red propia (Punto de Acceso)
+  WiFi.softAP(AP_SSID, AP_PASSWORD);
+  Serial.print("Red propia emitida: ");
+  Serial.println(AP_SSID);
+
+  // 4. Habilitar la traducción de direcciones de red (NAT)
+  // Esto permite que el tráfico de la red propia pase hacia la red externa.
+  // Se obtiene la interfaz de red (WIFI_AP_DEF) de forma segura mediante esp_netif.
+  esp_netif_t *netif_ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+  
+  if (netif_ap != NULL) {
+      esp_netif_napt_enable(netif_ap); // Activa el enrutamiento interno
+      Serial.println("Servidor NAT activado. ¡El internet está fluyendo, ou lleah ...(*￣０￣)ノ");
+  } else {
+      Serial.println("Error: No se encontró la interfaz de red.");
+  }
+}
+
+void loop() {
+  // En este modo, el sistema operativo de la ESP32 (FreeRTOS) gestiona
+  // el enrutamiento de paquetes de red de manera automática.
+  // No se requiere código adicional para mantener el internet activo.
+}
