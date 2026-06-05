@@ -1,0 +1,509 @@
+# Juego
+
+import pygame
+import sys
+import random
+import math
+import threading
+import time
+import serial  # ¡Cambiamos requests por serial!
+
+# ─────────────────────────────────────────
+#  CONFIGURACIÓN PUERTO SERIE (ESP32)
+# ─────────────────────────────────────────
+PUERTO = "COM5"  # Cambia esto por el tuyo
+BAUD_RATE = 115200
+
+# Iniciar conexión Serial
+try:
+    esp32 = serial.Serial(PUERTO, BAUD_RATE, timeout=1)
+    print(f"[SERIAL] Conectado al ESP32 en el puerto {PUERTO}")
+except Exception as e:
+    print(f"[SERIAL] Error de conexión: {e}")
+    esp32 = None
+
+# Estado global del jugador actual
+jugador_actual = {"id_rfid": "--------", "usr": "Esperando...", "score": 0}
+nfc_nuevo      = None
+nfc_lock       = threading.Lock()
+
+def enviar_puntuacion(uid, usr, score):
+    """Manda el score a la ESP32 por cable, y ella lo sube al servidor"""
+    if esp32 and esp32.is_open:
+        comando = f"PUNTUACION:{uid}:{usr}:{score}\n"
+        esp32.write(comando.encode('utf-8'))
+        print(f"[SERIAL] Puntuación enviada a la placa: {score} pts")
+
+def hilo_nfc():
+    """Escucha todo el tiempo lo que dice la ESP32 por el cable USB"""
+    global nfc_nuevo
+    while True:
+        if esp32 and esp32.is_open:
+            try:
+                if esp32.in_waiting > 0:
+                    linea = esp32.readline().decode('utf-8', errors='ignore').strip()
+                    
+                    # Mostramos en consola lo que manda la placa
+                    print(f"[ESP32 RAW] {linea}") 
+                    
+                    # En cuanto la ESP32 detecta una tarjeta, creamos el usuario localmente
+                    if linea.startswith("TARJETA:"):
+                        uid = linea.split(":")[1]
+                        
+                        # Generamos el código hexadecimal basado en el UID (quitando los ":")
+                        codigo_hex = uid.replace(":", "")
+                        
+                        # Asignamos ese código como el 'usr' y le damos un score inicial de 0
+                        with nfc_lock:
+                            nfc_nuevo = {"id_rfid": uid, "usr": codigo_hex, "score": 0}
+                            
+                        print(f"[NFC] Autenticación local exitosa. Jugador: {codigo_hex}")
+                        
+            except Exception as e:
+                print(f"[EXCEPCIÓN SERIAL] {e}")
+        time.sleep(0.1)
+
+# Inicia el hilo de escucha en segundo plano
+threading.Thread(target=hilo_nfc, daemon=True).start()
+
+# ─────────────────────────────────────────
+#  CONFIGURACIÓN DEL JUEGO
+# ─────────────────────────────────────────
+ANCHO, ALTO = 480, 640
+FPS = 60
+
+CIELO_DIA    = (113, 197, 207)
+CIELO_NOCHE  = (25,  35,  70)
+VERDE        = (83,  209,  80)
+VERDE_OSC    = (60,  150,  55)
+CAFE         = (185, 122,  87)
+AMARILLO     = (255, 218,   0)
+AMARILLO_OSC = (200, 170,   0)
+NARANJA      = (255, 140,   0)
+BLANCO       = (255, 255, 255)
+NEGRO        = (  0,   0,   0)
+GRIS         = (150, 150, 150)
+ROJO         = (220,  50,  50)
+
+GRAVEDAD      = 0.45
+FUERZA_SALTO  = -9.0
+VEL_TUBO      = 3.5
+ANCHO_TUBO    = 65
+HUECO_TUBO    = 160
+DIST_TUBOS    = 220
+
+
+# ─────────────────────────────────────────
+#  DIBUJO DEL PÁJARO
+# ─────────────────────────────────────────
+def dibujar_pajaro(surface, x, y, angulo, aleteo):
+    cx, cy = int(x), int(y)
+    pygame.draw.polygon(surface, AMARILLO_OSC, [
+        (cx - 14, cy + 2), (cx - 24, cy - 6 + aleteo * 3), (cx - 20, cy + 8)])
+    pygame.draw.ellipse(surface, AMARILLO,     (cx - 18, cy - 14, 36, 28))
+    pygame.draw.ellipse(surface, AMARILLO_OSC, (cx - 18, cy - 14, 36, 28), 2)
+    ala_y = cy - 4 + int(aleteo * 6)
+    pygame.draw.ellipse(surface, AMARILLO_OSC, (cx - 12, ala_y - 6, 20, 10))
+    pygame.draw.circle(surface, BLANCO, (cx + 6, cy - 4), 8)
+    pygame.draw.circle(surface, NEGRO,  (cx + 8, cy - 3), 4)
+    pygame.draw.circle(surface, BLANCO, (cx + 9, cy - 4), 1)
+    pico = [(cx + 12, cy + 2), (cx + 22, cy - 1), (cx + 12, cy + 7)]
+    pygame.draw.polygon(surface, NARANJA, pico)
+    pygame.draw.circle(surface, (255, 160, 120), (cx + 5, cy + 4), 4)
+
+
+# ─────────────────────────────────────────
+#  TUBOS
+# ─────────────────────────────────────────
+def dibujar_tubo(surface, x, hueco_y):
+    top_h = hueco_y - HUECO_TUBO // 2
+    if top_h > 0:
+        pygame.draw.rect(surface, VERDE,     (x, 0, ANCHO_TUBO, top_h))
+        pygame.draw.rect(surface, VERDE_OSC, (x, 0, ANCHO_TUBO, top_h), 3)
+        pygame.draw.rect(surface, VERDE,     (x - 5, top_h - 22, ANCHO_TUBO + 10, 22))
+        pygame.draw.rect(surface, VERDE_OSC, (x - 5, top_h - 22, ANCHO_TUBO + 10, 22), 3)
+    bot_y = hueco_y + HUECO_TUBO // 2
+    bot_h = ALTO - bot_y - 80
+    if bot_h > 0:
+        pygame.draw.rect(surface, VERDE,     (x, bot_y, ANCHO_TUBO, bot_h))
+        pygame.draw.rect(surface, VERDE_OSC, (x, bot_y, ANCHO_TUBO, bot_h), 3)
+        pygame.draw.rect(surface, VERDE,     (x - 5, bot_y, ANCHO_TUBO + 10, 22))
+        pygame.draw.rect(surface, VERDE_OSC, (x - 5, bot_y, ANCHO_TUBO + 10, 22), 3)
+
+
+# ─────────────────────────────────────────
+#  NUBES
+# ─────────────────────────────────────────
+class Nube:
+    def __init__(self, x=None):
+        self.x     = x if x else random.randint(0, ANCHO)
+        self.y     = random.randint(40, ALTO // 2)
+        self.escala = random.uniform(0.6, 1.2)
+        self.vel   = random.uniform(0.4, 0.9)
+
+    def actualizar(self):
+        self.x -= self.vel
+        if self.x < -120:
+            self.x = ANCHO + 20
+            self.y = random.randint(40, ALTO // 2)
+
+    def dibujar(self, surface, color=(255, 255, 255)):
+        e = self.escala
+        cx, cy = int(self.x), int(self.y)
+        for dx, dy, r in [(0,0,20),(-22,8,16),(22,8,16),(-10,-10,14),(10,-10,14)]:
+            pygame.draw.circle(surface, color,
+                               (cx + int(dx*e), cy + int(dy*e)), int(r*e))
+
+
+# ─────────────────────────────────────────
+#  ESTRELLAS
+# ─────────────────────────────────────────
+class Estrella:
+    def __init__(self):
+        self.x       = random.randint(0, ANCHO)
+        self.y       = random.randint(0, ALTO // 2)
+        self.r       = random.uniform(0.5, 2)
+        self.parpadeo = random.uniform(0, math.pi * 2)
+
+    def dibujar(self, surface, t):
+        b = int(180 + 75 * math.sin(self.parpadeo + t * 0.05))
+        pygame.draw.circle(surface, (b, b, b), (self.x, self.y), int(self.r))
+
+
+# ─────────────────────────────────────────
+#  SUELO
+# ─────────────────────────────────────────
+def dibujar_suelo(surface, offset):
+    y = ALTO - 80
+    pygame.draw.rect(surface, (222, 184, 135), (0, y, ANCHO, 80))
+    pygame.draw.rect(surface, CAFE, (0, y, ANCHO, 8))
+    for i in range(-1, ANCHO // 40 + 2):
+        gx = i * 40 - offset % 40
+        pygame.draw.line(surface, (170, 130, 80), (gx, y + 8), (gx, y + 80), 1)
+
+
+# ─────────────────────────────────────────
+#  PARTÍCULAS
+# ─────────────────────────────────────────
+class Particula:
+    def __init__(self, x, y):
+        self.x       = x
+        self.y       = y
+        self.vx      = random.uniform(-3, 3)
+        self.vy      = random.uniform(-6, -1)
+        self.vida    = random.randint(20, 40)
+        self.vida_max = self.vida
+        self.color   = random.choice([AMARILLO, NARANJA, BLANCO, (255, 200, 0)])
+        self.r       = random.randint(3, 7)
+
+    def actualizar(self):
+        self.x  += self.vx
+        self.vy += 0.2
+        self.y  += self.vy
+        self.vida -= 1
+
+    def dibujar(self, surface):
+        alpha = self.vida / self.vida_max
+        r = max(1, int(self.r * alpha))
+        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), r)
+
+
+# ─────────────────────────────────────────
+#  JUEGO PRINCIPAL
+# ─────────────────────────────────────────
+class FlappyBird:
+    def __init__(self):
+        pygame.init()
+        pygame.display.set_caption("Flappy Bird - Arcade NFC")
+        self.screen       = pygame.display.set_mode((ANCHO, ALTO))
+        self.clock        = pygame.time.Clock()
+        self.fuente_grande = pygame.font.SysFont("Arial", 64, bold=True)
+        self.fuente_media  = pygame.font.SysFont("Arial", 36, bold=True)
+        self.fuente_peq    = pygame.font.SysFont("Arial", 24, bold=True)
+        self.fuente_xs     = pygame.font.SysFont("Arial", 18)
+        self.nubes         = [Nube() for _ in range(6)]
+        self.estrellas     = [Estrella() for _ in range(60)]
+        self.mejor         = 0
+        self.reiniciar()
+
+    # ── Reset del juego (NO toca jugador_actual) ──
+    def reiniciar(self):
+        self.pajaro_x   = ANCHO // 3
+        self.pajaro_y   = float(ALTO // 2)
+        self.vel_y      = 0.0
+        self.angulo     = 0.0
+        self.aleteo     = 0
+        self.dir_alet   = 1
+        self.tubos      = []
+        self.puntaje    = 0
+        self.estado     = "menu"
+        self.suelo_off  = 0
+        self.t          = 0
+        self.particulas = []
+        self.flash      = 0
+        self.modo_noche = False
+        self._generar_primer_tubo()
+
+    def _generar_primer_tubo(self):
+        hueco_y = random.randint(160, ALTO - 160 - 80)
+        self.tubos.append([ANCHO + 60, hueco_y, False])
+
+    # ── Envia el score al servidor (llamado al morir) ──
+    def actualizar_bd(self):
+        global jugador_actual
+        if jugador_actual["id_rfid"] != "--------" and self.puntaje > 0:
+            threading.Thread(
+                target=enviar_puntuacion,
+                args=(jugador_actual["id_rfid"], jugador_actual["usr"], self.puntaje),
+                daemon=True
+            ).start()
+
+    # ── Revisa si hay nueva tarjeta NFC escaneada ──
+    def _verificar_nfc(self):
+        global nfc_nuevo, jugador_actual
+        with nfc_lock:
+            if nfc_nuevo is None:
+                return
+            data    = nfc_nuevo
+            nfc_nuevo = None
+
+        if data["id_rfid"] == jugador_actual["id_rfid"]:
+            # Misma tarjeta: solo reinicia si el juego termino
+            if self.estado == "muerto":
+                self.reiniciar()
+                self.estado = "jugando"
+                self.vel_y  = FUERZA_SALTO
+                print(f"[JUEGO] Mismo jugador reinicia: {jugador_actual['usr']}")
+        else:
+            # Tarjeta diferente: guarda score del jugador anterior y cambia
+            if self.estado in ("jugando", "muerto"):
+                self.actualizar_bd()
+            jugador_actual = data
+            self.mejor     = data.get("score", 0)  # carga su record historico
+            self.reiniciar()
+            self.estado = "jugando"
+            self.vel_y  = FUERZA_SALTO
+            print(f"[JUEGO] Nuevo jugador: {jugador_actual['usr']} | Record: {self.mejor}")
+
+    # ── Loop principal ──
+    def run(self):
+        while True:
+            self._eventos()
+            self._actualizar()
+            self._dibujar()
+            self.clock.tick(FPS)
+
+    # ── Eventos de teclado/mouse ──
+    def _eventos(self):
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE:
+                    pygame.quit(); sys.exit()
+                if ev.key in (pygame.K_SPACE, pygame.K_UP, pygame.K_w):
+                    self._saltar()
+            if ev.type == pygame.MOUSEBUTTONDOWN:
+                self._saltar()
+
+    def _saltar(self):
+        if self.estado == "menu":
+            if jugador_actual["id_rfid"] != "--------":
+                # Solo arranca si hay jugador registrado
+                self.estado = "jugando"
+                self.vel_y  = FUERZA_SALTO
+        elif self.estado == "jugando":
+            self.vel_y = FUERZA_SALTO
+            for _ in range(5):
+                self.particulas.append(Particula(self.pajaro_x, self.pajaro_y))
+        elif self.estado == "muerto":
+            self.actualizar_bd()
+            self.reiniciar()
+            self.estado = "jugando"
+            self.vel_y  = FUERZA_SALTO
+
+    # ── Actualizar logica ──
+    def _actualizar(self):
+        self.t += 1
+
+        # Revisar NFC cada 60 frames (~1 segundo)
+        if self.t % 60 == 0:
+            self._verificar_nfc()
+
+        self.aleteo += 0.15 * self.dir_alet
+        if abs(self.aleteo) >= 1:
+            self.dir_alet *= -1
+        for n in self.nubes:
+            n.actualizar()
+
+        if self.estado != "jugando":
+            return
+
+        self.vel_y    += GRAVEDAD
+        self.pajaro_y += self.vel_y
+        self.angulo    = max(-30, min(90, self.vel_y * 4))
+        self.suelo_off += VEL_TUBO
+        self.modo_noche = (self.puntaje // 10) % 2 == 1
+
+        if not self.tubos or self.tubos[-1][0] < ANCHO - DIST_TUBOS:
+            hueco_y = random.randint(160, ALTO - 160 - 80)
+            self.tubos.append([ANCHO + 10, hueco_y, False])
+
+        for t in self.tubos:
+            t[0] -= VEL_TUBO
+            if not t[2] and t[0] + ANCHO_TUBO < self.pajaro_x:
+                t[2] = True
+                self.puntaje += 1
+                if self.puntaje > self.mejor:
+                    self.mejor = self.puntaje
+
+        self.tubos = [t for t in self.tubos if t[0] > -ANCHO_TUBO - 20]
+
+        if self._colision():
+            self.estado = "muerto"
+            self.flash  = 8
+            self.actualizar_bd()  # guardar score al morir
+            for _ in range(25):
+                self.particulas.append(Particula(self.pajaro_x, self.pajaro_y))
+
+        for p in self.particulas:
+            p.actualizar()
+        self.particulas = [p for p in self.particulas if p.vida > 0]
+
+        if self.flash > 0:
+            self.flash -= 1
+
+    def _colision(self):
+        r = 14
+        px, py = self.pajaro_x, self.pajaro_y
+        if py + r >= ALTO - 80 or py - r <= 0:
+            return True
+        for tx, hy, _ in self.tubos:
+            if px + r > tx and px - r < tx + ANCHO_TUBO:
+                if py - r < hy - HUECO_TUBO // 2 or py + r > hy + HUECO_TUBO // 2:
+                    return True
+        return False
+
+    # ── Dibujar ──
+    def _dibujar(self):
+        if self.modo_noche:
+            self.screen.fill(CIELO_NOCHE)
+            for e in self.estrellas:
+                e.dibujar(self.screen, self.t)
+            nube_color = (60, 70, 100)
+        else:
+            self.screen.fill(CIELO_DIA)
+            nube_color = BLANCO
+
+        for n in self.nubes:
+            n.dibujar(self.screen, nube_color)
+
+        # Sol / Luna
+        if not self.modo_noche:
+            pygame.draw.circle(self.screen, (255, 240, 100), (380, 70), 38)
+            for ang in range(0, 360, 45):
+                rad = math.radians(ang + self.t * 0.3)
+                x1 = 380 + int(math.cos(rad) * 44)
+                y1 =  70 + int(math.sin(rad) * 44)
+                x2 = 380 + int(math.cos(rad) * 54)
+                y2 =  70 + int(math.sin(rad) * 54)
+                pygame.draw.line(self.screen, (255, 220, 50), (x1,y1), (x2,y2), 2)
+        else:
+            pygame.draw.circle(self.screen, (230, 230, 200), (380, 70), 28)
+
+        for tx, hy, _ in self.tubos:
+            dibujar_tubo(self.screen, int(tx), hy)
+
+        dibujar_suelo(self.screen, self.suelo_off)
+        dibujar_pajaro(self.screen, self.pajaro_x, self.pajaro_y, self.angulo, self.aleteo)
+
+        for p in self.particulas:
+            p.dibujar(self.screen)
+
+        if self.flash > 0:
+            s = pygame.Surface((ANCHO, ALTO))
+            s.set_alpha(self.flash * 25)
+            s.fill(BLANCO)
+            self.screen.blit(s, (0, 0))
+
+        # ── HUD ──
+        if self.estado == "jugando":
+            self._texto_sombra(str(self.puntaje), self.fuente_grande, BLANCO, ANCHO // 2, 50)
+            # Nombre del jugador arriba
+            self._texto_sombra(jugador_actual["usr"], self.fuente_xs, AMARILLO, ANCHO // 2, 100)
+
+        elif self.estado == "menu":
+            self._panel_menu()
+
+        elif self.estado == "muerto":
+            self._panel_game_over()
+
+        pygame.display.flip()
+
+    def _texto_sombra(self, texto, fuente, color, cx, cy):
+        s = fuente.render(texto, True, NEGRO)
+        t = fuente.render(texto, True, color)
+        rect = t.get_rect(center=(cx, cy))
+        self.screen.blit(s, rect.move(2, 2))
+        self.screen.blit(t, rect)
+
+    def _panel_menu(self):
+        panel = pygame.Surface((360, 280), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 130))
+        self.screen.blit(panel, (60, ALTO // 2 - 160))
+
+        self._texto_sombra("FLAPPY BIRD", self.fuente_media, AMARILLO, ANCHO // 2, ALTO // 2 - 110)
+
+        t_alet = math.sin(self.t * 0.15)
+        dibujar_pajaro(self.screen, ANCHO // 2, ALTO // 2 - 30, 0, t_alet)
+
+        if jugador_actual["id_rfid"] == "--------":
+            # Sin jugador: pedir que acerquen tarjeta
+            self._texto_sombra("Acerca tu tarjeta NFC", self.fuente_peq, AMARILLO, ANCHO // 2, ALTO // 2 + 50)
+            self._texto_sombra("para comenzar", self.fuente_peq, BLANCO, ANCHO // 2, ALTO // 2 + 82)
+        else:
+            # Jugador listo
+            self._texto_sombra(f"Hola, {jugador_actual['usr']}!", self.fuente_peq, BLANCO,   ANCHO // 2, ALTO // 2 + 50)
+            self._texto_sombra("ESPACIO o toca para jugar",        self.fuente_xs,  BLANCO,   ANCHO // 2, ALTO // 2 + 82)
+            if self.mejor > 0:
+                self._texto_sombra(f"Record: {self.mejor}", self.fuente_peq, AMARILLO, ANCHO // 2, ALTO // 2 + 115)
+
+    def _panel_game_over(self):
+        panel = pygame.Surface((360, 320), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 150))
+        self.screen.blit(panel, (60, ALTO // 2 - 180))
+
+        self._texto_sombra("GAME OVER", self.fuente_media, ROJO,    ANCHO // 2, ALTO // 2 - 130)
+        self._texto_sombra(f"Puntaje: {self.puntaje}", self.fuente_media, BLANCO,   ANCHO // 2, ALTO // 2 - 75)
+        self._texto_sombra(f"Record:  {self.mejor}",   self.fuente_media, AMARILLO, ANCHO // 2, ALTO // 2 - 25)
+
+        # Medalla
+        if   self.puntaje >= 30: medal_color, medal_txt = (255,215,0),   "ORO"
+        elif self.puntaje >= 20: medal_color, medal_txt = (192,192,192), "PLATA"
+        elif self.puntaje >= 10: medal_color, medal_txt = (205,127,50),  "BRONCE"
+        else:                    medal_color, medal_txt = GRIS,          ""
+        if medal_txt:
+            self._texto_sombra(medal_txt, self.fuente_peq, medal_color, ANCHO // 2, ALTO // 2 + 35)
+
+        self._texto_sombra("ESPACIO para reiniciar", self.fuente_xs, BLANCO, ANCHO // 2, ALTO // 2 + 75)
+        self._texto_sombra("o acerca otra tarjeta",  self.fuente_xs, GRIS,   ANCHO // 2, ALTO // 2 + 100)
+
+        if self.puntaje > 0 and self.puntaje == self.mejor:
+            boom = math.sin(self.t * 0.2)
+            self._texto_sombra("NUEVO RECORD!", self.fuente_peq,
+                               (255, int(200 + 55 * boom), 0), ANCHO // 2, ALTO // 2 + 135)
+
+
+# ─────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────
+if __name__ == "__main__":
+    try:
+        import pygame, requests
+    except ImportError as e:
+        print(f"Falta instalar: {e}")
+        print("pip install pygame requests")
+        sys.exit(1)
+
+    juego = FlappyBird()
+    juego.run()
